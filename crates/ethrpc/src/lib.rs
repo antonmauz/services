@@ -14,6 +14,7 @@ use {
     std::{num::NonZeroUsize, time::Duration},
 };
 
+// todo take a look 
 pub const MAX_BATCH_SIZE: usize = 100;
 
 pub type Web3 = DynWeb3;
@@ -52,7 +53,7 @@ impl Config {
         }
     }
 }
-
+// todo take a look 
 impl Default for Config {
     fn default() -> Self {
         Self {

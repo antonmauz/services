@@ -549,7 +549,7 @@ pub async fn run(args: Arguments) {
         liveness.clone(),
         Arc::new(maintenance),
     );
-    run.run_forever().await;
+    run.run_forever().await
 }
 
 async fn shadow_mode(args: Arguments) -> ! {
@@ -622,5 +622,5 @@ async fn shadow_mode(args: Arguments) -> ! {
         current_block,
         args.max_winners_per_auction,
     );
-    shadow.run_forever().await;
+    shadow.run_forever().await
 }
