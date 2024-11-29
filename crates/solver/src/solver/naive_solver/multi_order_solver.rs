@@ -392,6 +392,7 @@ mod tests {
     fn finds_clearing_price_with_sell_orders_on_both_sides() {
         let token_a = Address::from_low_u64_be(0);
         let token_b = Address::from_low_u64_be(1);
+        let token_c = Address::from_low_u64_be(1);
         let orders = vec![
             LimitOrder {
                 sell_token: token_a,
@@ -404,7 +405,7 @@ mod tests {
             },
             LimitOrder {
                 sell_token: token_b,
-                buy_token: token_a,
+                buy_token: token_c,
                 sell_amount: to_wei(100),
                 buy_amount: to_wei(90),
                 kind: OrderKind::Sell,
