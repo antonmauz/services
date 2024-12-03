@@ -2,9 +2,7 @@ use {
     crate::{
         boundary::liquidity::constant_product::to_boundary_pool,
         domain::{
-            eth,
-            liquidity,
-            order,
+            eth, liquidity, order,
             solution::{self},
         },
     },
@@ -16,16 +14,11 @@ use {
     solver::{
         liquidity::{
             slippage::{SlippageCalculator, SlippageContext},
-            AmmOrderExecution,
-            ConstantProductOrder,
-            Exchange,
-            LimitOrder,
-            LimitOrderExecution,
-            LimitOrderId,
-            SettlementHandling,
+            AmmOrderExecution, ConstantProductOrder, Exchange, LimitOrder, LimitOrderExecution,
+            LimitOrderId, SettlementHandling,
         },
         settlement::SettlementEncoder,
-        solver::naive_solver::multi_order_solver,
+        solver::naive_solver::ring_trades_solver,
     },
     std::sync::{Arc, Mutex},
 };
@@ -50,7 +43,7 @@ pub fn solve(
     // settlement transaction anyway.
     let boundary_orders = orders
         .iter()
-        // The naive solver currently doesn't support limit orders, so filter them out.
+        // The circle solver currently doesn't support limit orders, so filter them out.
         .filter(|order| !order.solver_determines_fee())
         .map(|order| LimitOrder {
             id: match order.class {
@@ -106,8 +99,8 @@ pub fn solve(
     );
 
     let boundary_solution =
-        multi_order_solver::solve(&slippage.context(), boundary_orders, &boundary_pool)?;
-   
+        ring_trades_solver::solve(&slippage.context(), boundary_orders, &boundary_pool);
+
     let swap = pool_handler.swap.lock().unwrap().take();
     Some(solution::Solution {
         id: Default::default(),

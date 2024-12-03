@@ -1,1 +1,2 @@
 pub mod multi_order_solver;
+pub mod ring_trades_solver;

@@ -4,13 +4,15 @@ use crate::{
 };
 
 pub mod baseline;
+pub mod circle;
 pub mod naive;
 
-pub use self::{baseline::Baseline, naive::Naive};
+pub use self::{baseline::Baseline, circle::Circle, naive::Naive};
 
 pub enum Solver {
     Baseline(Baseline),
     Naive(Naive),
+    Circle(Circle),
 }
 
 impl Solver {
@@ -23,6 +25,7 @@ impl Solver {
         let solutions = match self {
             Solver::Baseline(solver) => solver.solve(auction).await,
             Solver::Naive(solver) => solver.solve(auction).await,
+            Solver::Circle(solver) => solver.solve(auction).await,
         };
         metrics::solved(&deadline, &solutions);
         solutions

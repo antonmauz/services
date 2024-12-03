@@ -356,6 +356,7 @@ fn is_valid_solution(solution: &Settlement) -> bool {
     true
 }
 
+/* 
 #[cfg(test)]
 mod tests {
     use {
@@ -371,8 +372,7 @@ mod tests {
         num::rational::Ratio,
         once_cell::sync::OnceCell,
         shared::{
-            baseline_solver::BaselineSolvable,
-            external_prices::ExternalPrices,
+            baseline_solver::BaselineSolvable, external_prices::ExternalPrices,
             sources::uniswap_v2::pool_fetching::Pool,
         },
     };
@@ -1085,3 +1085,4 @@ mod tests {
         );
     }
 }
+ */

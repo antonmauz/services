@@ -2,6 +2,7 @@
 //! "legacy" logic in `shared` and `model`.
 
 pub mod baseline;
+pub mod circle;
 pub mod liquidity;
 pub mod naive;
 

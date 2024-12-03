@@ -18,6 +18,7 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true }
 contracts = { path = "../contracts" }
 derivative = { workspace = true }
+petgraph = "0.6"
 ethcontract = { workspace = true }
 ethrpc = { path = "../ethrpc" }
 flate2 = { workspace = true }
