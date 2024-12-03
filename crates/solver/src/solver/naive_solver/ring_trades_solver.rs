@@ -23,6 +23,18 @@ use {
     web3::types::Address,
 };
 
+impl ConstantProductOrder {
+    fn get_reserves(&self, token: &Address) -> Option<U256> {
+        if &self.tokens.get().0 == token {
+            Some(self.reserves.0.into())
+        } else if &self.tokens.get().1 == token {
+            Some(self.reserves.1.into())
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TokenContext {
     address: Address,
@@ -32,20 +44,76 @@ struct TokenContext {
 }
 
 impl TokenContext {
-    pub fn can_trade(&self, required_amount: U256) -> bool {
-        self.reserve >= required_amount
+    pub fn is_excess_after_fees(&self, deficit: &TokenContext, fee: Ratio<u32>) -> bool {
+        fee.denom()
+            * u256_to_big_int(&self.reserve)
+            * (u256_to_big_int(&deficit.sell_volume) - u256_to_big_int(&deficit.buy_volume))
+            < (fee.denom() - fee.numer())
+                * u256_to_big_int(&deficit.reserve)
+                * (u256_to_big_int(&self.sell_volume) - u256_to_big_int(&self.buy_volume))
+    }
+
+    pub fn is_excess_before_fees(&self, deficit: &TokenContext) -> bool {
+        u256_to_big_int(&self.reserve)
+            * (u256_to_big_int(&deficit.sell_volume) - u256_to_big_int(&deficit.buy_volume))
+            < u256_to_big_int(&deficit.reserve)
+                * (u256_to_big_int(&self.sell_volume) - u256_to_big_int(&self.buy_volume))
     }
 }
 
-/// Adapts the solve function to find cycles
 pub fn solve(
     slippage: &SlippageContext,
     orders: impl IntoIterator<Item = LimitOrder>,
     pool: &ConstantProductOrder,
-) {
-    let orders: Vec<LimitOrder> = orders.into_iter().collect();
+) -> Option<Settlement> {
+    let mut orders: Vec<LimitOrder> = orders.into_iter().collect();
+    while !orders.is_empty() {
+        let (context_a, context_b) = split_into_contexts(&orders, pool);
+        if let Some(valid_solution) =
+            solve_orders(slippage, &orders, pool, &context_a, &context_b).filter(is_valid_solution)
+        {
+            return Some(valid_solution);
+        } else {
+            // remove order with worst limit price that is selling excess token (to make it
+            // less excessive) and try again
+
+            // Todo incorporate this into the solve exising amount function to remove the excess
+            // amount with the worst clearing price
+            let excess_token = if context_a.is_excess_before_fees(&context_b) {
+                context_a.address
+            } else {
+                context_b.address
+            };
+            let order_to_remove = orders
+                .iter()
+                .enumerate()
+                .filter(|o| o.1.sell_token == excess_token)
+                .max_by(|lhs, rhs| {
+                    (lhs.1.buy_amount * rhs.1.sell_amount)
+                        .cmp(&(lhs.1.sell_amount * rhs.1.buy_amount))
+                });
+            match order_to_remove {
+                Some((index, _)) => orders.swap_remove(index),
+                None => break,
+            };
+        }
+    }
+
+    None
+}
+
+fn solve_orders(
+    slippage: &SlippageContext,
+    orders: &[LimitOrder],
+    pool: &ConstantProductOrder,
+    context_a: &TokenContext,
+    context_b: &TokenContext,
+) -> Option<Settlement> {
+    let (settlement, excess_tokens) = solve_existing_amount(orders, context_b, context_a).ok();
+
+    let excess_orders: Vec<LimitOrder> = excess_tokens.into_iter().collect();
     // Transform LimitOrder into tuples
-    let order_tuples: Vec<(H160, H160, U256)> = orders
+    let excess_order_tuples: Vec<(H160, H160, U256)> = excess_orders
         .iter()
         .map(|order| {
             (
@@ -55,10 +123,82 @@ pub fn solve(
             )
         })
         .collect();
-    let token_graph = build_graph(&order_tuples);
-    let cycles = find_cycles(&token_graph);
 
-    // Log or assert to test the functions
+    let excess_token_graph = build_graph(&excess_order_tuples);
+    let cycles = find_cycles(&excess_token_graph);
+
+    for cycle in cycles {
+        settle_cycle(&mut settlement, &cycle, orders, &excess_tokens)?;
+    }
+
+    Some(settlement)
+}
+
+fn settle_cycle(
+    settlement: &mut Settlement,
+    cycle: &[H160],
+    orders: &[LimitOrder],
+    excess_tokens: &HashMap<Address, U256>,
+) -> Result<()> {
+    // Iterate over each pair of tokens in the cycle
+    for i in 0..cycle.len() {
+        let sell_token = cycle[i];
+        let buy_token = cycle[(i + 1) % cycle.len()];
+
+        // Determine the amount to trade based on excess tokens
+        let trade_amount = excess_tokens
+            .get(&sell_token)
+            .cloned()
+            .unwrap_or(U256::zero());
+
+        // Find the relevant order for this trade
+        if let Some(order) = orders
+            .iter()
+            .find(|o| o.sell_token == sell_token && o.buy_token == buy_token)
+        {
+            let execution = LimitOrderExecution {
+                filled: trade_amount.min(order.full_execution_amount()), // Ensure we don't exceed the order's amount
+                fee: order.user_fee,
+            };
+            settlement.with_liquidity(order, execution)?;
+        }
+    }
+    Ok(())
+}
+
+fn solve_existing_amount(
+    orders: &[LimitOrder],
+    context_a: &TokenContext,
+    context_b: &TokenContext,
+) -> Result<(Settlement, HashMap<Address, U256>)> {
+    let mut settlement = Settlement::new(maplit::hashmap! {
+        context_a.address => context_b.reserve,
+        context_b.address => context_a.reserve,
+    });
+
+    let mut total_buy_volume = U256::zero();
+    let mut total_sell_volume = U256::zero();
+
+    for order in orders {
+        let execution = LimitOrderExecution {
+            filled: order.full_execution_amount(),
+            fee: order.user_fee,
+        };
+        settlement.with_liquidity(order, execution)?;
+
+        // Accumulate total buy and sell volumes
+        total_buy_volume += order.buy_amount;
+        total_sell_volume += order.sell_amount;
+    }
+
+    // Calculate excess demand
+    let mut excess_demand = HashMap::new();
+    if total_buy_volume > total_sell_volume {
+        excess_demand.insert(context_a.address, total_buy_volume - total_sell_volume);
+    } else if total_sell_volume > total_buy_volume {
+        excess_demand.insert(context_b.address, total_sell_volume - total_buy_volume);
+    }
+    Ok((settlement, excess_demand))
 }
 
 /// Build a graph representation of token pairs from orders
@@ -78,24 +218,13 @@ fn build_graph(orders: &[(H160, H160, U256)]) -> DiGraph<H160, U256> {
     graph
 }
 
+/// finds cycles in the excess orders  
 fn find_cycles(graph: &DiGraph<H160, U256>) -> Vec<Vec<H160>> {
     let sccs = tarjan_scc(graph);
     sccs.into_iter()
         .filter(|scc| scc.len() > 1) // Filter out single-node SCCs
         .map(|scc| scc.into_iter().map(|index| graph[index]).collect())
         .collect()
-}
-
-impl ConstantProductOrder {
-    fn get_reserves(&self, token: &Address) -> Option<U256> {
-        if &self.tokens.get().0 == token {
-            Some(self.reserves.0.into())
-        } else if &self.tokens.get().1 == token {
-            Some(self.reserves.1.into())
-        } else {
-            None
-        }
-    }
 }
 
 fn split_into_contexts(
