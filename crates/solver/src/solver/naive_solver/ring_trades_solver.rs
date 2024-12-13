@@ -67,6 +67,44 @@ pub fn solve(
     pool: &ConstantProductOrder,
 ) -> Option<Settlement> {
     let mut orders: Vec<LimitOrder> = orders.into_iter().collect();
+
+    let excess_orders = solve_balanced_orders(&SlippageContext, &orders, &contexts);
+
+    let excess_token_graph = build_graph_with_constraints(&excess_order_tuples, &settlement);
+    let cycles = find_cycles(&excess_token_graph);
+
+    for cycle in cycles {
+        settle_cycle(&mut settlement, &cycle, &orders, &excess_tokens)?;
+    }
+
+    None
+}
+
+fn settle_trades(
+    orders: &[LimitOrder],
+    context_a: &TokenContext,
+    context_b: &TokenContext,
+) -> Result<Settlement> {
+    let mut settlement = Settlement::new(maplit::hashmap! {
+        context_a.address => context_b.reserve,
+        context_b.address => context_a.reserve,
+    });
+    for order in orders {
+        let execution = LimitOrderExecution {
+            filled: order.full_execution_amount(),
+            fee: order.user_fee,
+        };
+        settlement.with_liquidity(order, execution)?;
+    }
+    Ok(settlement)
+}
+
+fn solve_balanced_orders(
+    slippage: &SlippageContext,
+    orders: &[LimitOrder],
+    contexts: &HashMap<H160, TokenContext>,
+) -> Option<Settlement> {
+    let mut orders: Vec<LimitOrder> = orders.into_iter().collect();
     while !orders.is_empty() {
         let (context_a, context_b) = split_into_contexts(&orders, pool);
         if let Some(valid_solution) =
@@ -76,9 +114,6 @@ pub fn solve(
         } else {
             // remove order with worst limit price that is selling excess token (to make it
             // less excessive) and try again
-
-            // Todo incorporate this into the solve exising amount function to remove the excess
-            // amount with the worst clearing price
             let excess_token = if context_a.is_excess_before_fees(&context_b) {
                 context_a.address
             } else {
@@ -98,20 +133,6 @@ pub fn solve(
             };
         }
     }
-
-    None
-}
-
-fn solve_orders(
-    slippage: &SlippageContext,
-    orders: &[LimitOrder],
-    pool: &ConstantProductOrder,
-    context_a: &TokenContext,
-    context_b: &TokenContext,
-) -> Option<Settlement> {
-    let (settlement, excess_tokens) = solve_existing_amount(orders, context_b, context_a).ok();
-
-    let excess_orders: Vec<LimitOrder> = excess_tokens.into_iter().collect();
     // Transform LimitOrder into tuples
     let excess_order_tuples: Vec<(H160, H160, U256)> = excess_orders
         .iter()
@@ -123,14 +144,6 @@ fn solve_orders(
             )
         })
         .collect();
-
-    let excess_token_graph = build_graph(&excess_order_tuples);
-    let cycles = find_cycles(&excess_token_graph);
-
-    for cycle in cycles {
-        settle_cycle(&mut settlement, &cycle, orders, &excess_tokens)?;
-    }
-
     Some(settlement)
 }
 
@@ -166,54 +179,34 @@ fn settle_cycle(
     Ok(())
 }
 
-fn solve_existing_amount(
-    orders: &[LimitOrder],
-    context_a: &TokenContext,
-    context_b: &TokenContext,
-) -> Result<(Settlement, HashMap<Address, U256>)> {
-    let mut settlement = Settlement::new(maplit::hashmap! {
-        context_a.address => context_b.reserve,
-        context_b.address => context_a.reserve,
-    });
-
-    let mut total_buy_volume = U256::zero();
-    let mut total_sell_volume = U256::zero();
-
-    for order in orders {
-        let execution = LimitOrderExecution {
-            filled: order.full_execution_amount(),
-            fee: order.user_fee,
-        };
-        settlement.with_liquidity(order, execution)?;
-
-        // Accumulate total buy and sell volumes
-        total_buy_volume += order.buy_amount;
-        total_sell_volume += order.sell_amount;
-    }
-
-    // Calculate excess demand
-    let mut excess_demand = HashMap::new();
-    if total_buy_volume > total_sell_volume {
-        excess_demand.insert(context_a.address, total_buy_volume - total_sell_volume);
-    } else if total_sell_volume > total_buy_volume {
-        excess_demand.insert(context_b.address, total_sell_volume - total_buy_volume);
-    }
-    Ok((settlement, excess_demand))
-}
-
-/// Build a graph representation of token pairs from orders
-fn build_graph(orders: &[(H160, H160, U256)]) -> DiGraph<H160, U256> {
+// Build graph with constraints
+fn build_graph_with_constraints(
+    orders: &[(H160, H160, U256)],
+    settlement: &Settlement,
+) -> DiGraph<H160, U256> {
     let mut graph = DiGraph::new();
     let mut node_indices = HashMap::new();
 
     for &(sell_token, buy_token, amount) in orders {
-        let sell_index = *node_indices
-            .entry(sell_token)
-            .or_insert_with(|| graph.add_node(sell_token));
-        let buy_index = *node_indices
-            .entry(buy_token)
-            .or_insert_with(|| graph.add_node(buy_token));
-        graph.add_edge(sell_index, buy_index, amount);
+        // Fetch the clearing price for the sell and buy tokens
+        if let (Some(sell_price), Some(buy_price)) = (
+            settlement.clearing_price(sell_token),
+            settlement.clearing_price(buy_token),
+        ) {
+            // Calculate the desired exchange rate for this order
+            let desired_rate = Ratio::new(amount.into(), U256::one().into());
+
+            // Only add the edge if the desired rate is below the clearing price
+            if desired_rate < sell_price / buy_price {
+                let sell_index = *node_indices
+                    .entry(sell_token)
+                    .or_insert_with(|| graph.add_node(sell_token));
+                let buy_index = *node_indices
+                    .entry(buy_token)
+                    .or_insert_with(|| graph.add_node(buy_token));
+                graph.add_edge(sell_index, buy_index, amount);
+            }
+        }
     }
     graph
 }
@@ -261,7 +254,9 @@ fn split_into_contexts(
             sell_context.sell_volume += order.sell_amount
         }
     }
-    contexts
+    assert_eq!(contexts.len(), 2, "Orders contain more than two tokens");
+    let mut contexts = contexts.drain().map(|(_, v)| v);
+    (contexts.next().unwrap(), contexts.next().unwrap())
 }
 
 ///

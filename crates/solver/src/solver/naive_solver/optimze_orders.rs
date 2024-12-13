@@ -235,9 +235,16 @@ pub fn optimize_orders(
     } */
     // Call this function at the end of your `optimize_orders` function
     if let Some(solution) = solution.as_ref() {
+        println!("---------- RESULTS ----------\n");
+        println!("Prices: \n");
         print_variable_names_and_values(&solution, &p);
+        println!("-----------------------\n");
+        println!("Volumne in reference Token: \n");
         print_variable_names_and_values(&solution, &v);
+        println!("-----------------------\n");
+        println!("Order executed or not: \n");
         print_variable_names_and_values(&solution, &z);
+        println!("Order executed or not:\n ");
     }
 
     solution
@@ -376,6 +383,15 @@ mod tests {
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
+            LimitOrder {
+                id: 5.into(),
+                sell_token: H160::from_low_u64_be(0),
+                buy_token: H160::from_low_u64_be(1),
+                sell_amount: to_wei(400),
+                buy_amount: to_wei(390),
+                kind: OrderKind::Sell,
+                ..Default::default()
+            },
         ];
 
         let orders_b = vec![
@@ -392,8 +408,8 @@ mod tests {
                 id: 4.into(),
                 sell_token: H160::from_low_u64_be(1),
                 buy_token: H160::from_low_u64_be(0),
-                sell_amount: to_wei(180),
-                buy_amount: to_wei(200),
+                sell_amount: to_wei(160),
+                buy_amount: to_wei(300),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
