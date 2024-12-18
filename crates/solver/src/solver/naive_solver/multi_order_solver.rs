@@ -121,7 +121,6 @@ fn solve_without_uniswap(
         };
         settlement.with_liquidity(order, execution)?;
     }
-
     Ok(settlement)
 }
 
@@ -356,7 +355,7 @@ fn is_valid_solution(solution: &Settlement) -> bool {
     true
 }
 
-/* 
+/*
 #[cfg(test)]
 mod tests {
     use {
