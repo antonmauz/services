@@ -14,6 +14,7 @@ use {
         http_solver::model::TokenAmount,
     },
     std::collections::HashMap,
+    std::time::Instant,
     web3::types::Address,
 };
 
@@ -355,7 +356,6 @@ fn is_valid_solution(solution: &Settlement) -> bool {
     true
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use {
@@ -742,10 +742,14 @@ mod tests {
             fee: Ratio::new(3, 1000),
             settlement_handling: amm_handler,
         };
+        let start = std::time::Instant::now();
         let result = solve(&SlippageContext::default(), orders, &pool).unwrap();
-
+        let duration = start.elapsed();
         assert_eq!(result.traded_orders().count(), 2);
         assert!(is_valid_solution(&result));
+
+        let duration = start.elapsed(); // Stop the timer
+        println!("Test 'finds_solution_excluding_orders_whose_limit_price_is_not_satisfiable' took: {:?}", duration);
     }
 
     #[test]
@@ -1084,4 +1088,3 @@ mod tests {
         );
     }
 }
- */

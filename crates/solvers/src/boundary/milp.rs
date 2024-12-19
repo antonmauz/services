@@ -18,7 +18,7 @@ use {
             LimitOrderId, SettlementHandling,
         },
         settlement::SettlementEncoder,
-        //solver::naive_solver::ring_trades_solver,
+        solver::naive_solver::milp_solver,
     },
     std::sync::{Arc, Mutex},
 };
@@ -43,7 +43,7 @@ pub fn solve(
     // settlement transaction anyway.
     let boundary_orders = orders
         .iter()
-        // The circle solver currently doesn't support limit orders, so filter them out.
+        // The naive solver currently doesn't support limit orders, so filter them out.
         .filter(|order| !order.solver_determines_fee())
         .map(|order| LimitOrder {
             id: match order.class {
@@ -99,7 +99,7 @@ pub fn solve(
     );
 
     let boundary_solution =
-        ring_trades_solver::solve(&slippage.context(), boundary_orders, &boundary_pool);
+        milp_solver::solve(&slippage.context(), boundary_orders, &boundary_pool)?;
 
     let swap = pool_handler.swap.lock().unwrap().take();
     Some(solution::Solution {

@@ -112,9 +112,6 @@ pub fn optimize_orders(
         });
     }
 
-    // Big-M constants and epsilon
-    //let big_m_1 = 1_000_000.0;
-    //let big_m_2 = 1_000_000.0;
     let epsilon = 0.001;
 
     let mut problem_vars = ProblemVariables::new();
@@ -130,7 +127,6 @@ pub fn optimize_orders(
         .using(default_solver);
 
     // After creating the model, add constraints for p[j] bounds based on tokens[j].
-
     for j in 0..n_t {
         model = model.with(constraint!(p[j] >= tokens[j].underline_p));
         model = model.with(constraint!(p[j] <= tokens[j].bar_p));
@@ -238,109 +234,6 @@ pub fn optimize_orders(
     solution.map(|sol| (sol, p, v, z))
 }
 
-/*
-fn add_additional_inequalities(
-    mut model: impl SolverModel,
-    orders_data: &Vec<OrderData>,
-    p: &Vec<Variable>,
-    z: &Vec<Variable>,
-) -> impl SolverModel {
-    // ============= INEQUALITIES (17) ==============
-    // Group orders by token pair (j,k)
-    let mut orders_by_pair: HashMap<(usize, usize), Vec<(usize, f64)>> = HashMap::new();
-    for (i, od) in orders_data.iter().enumerate() {
-        orders_by_pair
-            .entry((od.j, od.k))
-            .or_default()
-            .push((i, od.pi));
-    }
-
-    // Sort each group by pi and add chain inequalities
-    for ((j, k), orders_vec) in &mut orders_by_pair {
-        orders_vec.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        for idx in 0..(orders_vec.len() - 1) {
-            let (i1, pi1) = orders_vec[idx];
-            let (i2, pi2) = orders_vec[idx + 1];
-            // z[i1] ≤ z[i2]
-            model = model.with(constraint!(z[i1]<=(z[i2])));
-
-            // If pi1 == pi2, then z[i1] = z[i2]
-            if (pi1 - pi2).abs() < 1e-12 {
-                model = model.with(constraint!(z[i1]==(z[i2])));
-            }
-        }
-    }
-
-    // ============= OPPOSITE DIRECTIONS (m=2 CYCLES) (18) and (19) ==============
-    // For each pair (j,k), if (k,j) exists, check pairs of orders
-    let mut orders_by_pair_map: HashMap<(usize, usize), Vec<(usize, f64)>> = HashMap::new();
-    for (i, od) in orders_data.iter().enumerate() {
-        orders_by_pair_map
-            .entry((od.j, od.k))
-            .or_default()
-            .push((i, od.pi));
-    }
-
-    for ((j, k), vec_jk) in &orders_by_pair_map {
-        if let Some(vec_kj) = orders_by_pair_map.get(&(k.clone(), j.clone())) {
-            // For each ω1 in (j,k) and ω2 in (k,j):
-            for &(i1, pi1) in vec_jk {
-                for &(i2, pi2) in vec_kj {
-                    let product = pi1 * pi2;
-                    // If pi1 * pi2 < 1 => z[i1] + z[i2] ≤ 1
-                    // If pi1 * pi2 ≥ 1 => z[i1] + z[i2] ≥ 1
-                    let expr = z[i1] + z[i2];
-                    if product < 1.0 {
-                        model = model.with(expr.leq(1.0));
-                    } else {
-                        model = model.with(expr.geq(1.0));
-                    }
-                }
-            }
-        }
-    }
-
-    // ============= CYCLES OF LENGTH 3 (as an example) ==============
-    // For all triples of distinct tokens (j1,j2,j3), if orders form j1->j2, j2->j3, j3->j1 cycle,
-    // add constraints:
-    // If ∏ pi_i < 1 => ∑ z_i ≤ m - 1 (m=3 => ≤ 2)
-    // If ∏ pi_i ≥ 1 => ∑ z_i ≥ 1
-    //
-    // We'll map (j,k) to orders and try to find such triples.
-    let mut order_map: HashMap<(usize, usize), Vec<(usize, f64)>> = HashMap::new();
-    let tokens_used: Vec<usize> = orders_data.iter().flat_map(|o| vec![o.j, o.k]).collect();
-    let unique_tokens: Vec<usize> = {
-        let mut set = std::collections::HashSet::new();
-        tokens_used.into_iter().filter(|x| set.insert(*x)).collect()
-    };
-
-    for (i, od) in orders_data.iter().enumerate() {
-        order_map.entry((od.j, od.k)).or_default().push((i, od.pi));
-    }
-
-    fn add_cycle_constraints(
-        mut model: impl SolverModel,
-        z: &Vec<Variable>,
-        cycle_orders: &[(usize, f64)],
-    ) -> impl SolverModel {
-        let m = cycle_orders.len();
-        let product_pi: f64 = cycle_orders.iter().map(|(_, pi)| pi).product();
-        let sum_z_expr = cycle_orders
-            .iter()
-            .fold(Expression::from(0.0), |acc, (i, _)| acc + z[*i]);
-
-        if product_pi < 1.0 {
-            // sum z_i ≤ m - 1
-            model = model.with(sum_z_expr.leq((m as f64) - 1.0));
-        } else {
-            // sum z_i ≥ 1
-            model = model.with(sum_z_expr.geq(1.0));
-        }
-
-        model
-    }
-}*/
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,87 +258,41 @@ mod tests {
             },
             LimitOrder {
                 id: 2.into(),
-                sell_token: H160::from_low_u64_be(2),
-                buy_token: H160::from_low_u64_be(1),
-                sell_amount: to_wei(90),
-                buy_amount: to_wei(100),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },
-            LimitOrder {
-                id: 3.into(),
-                sell_token: H160::from_low_u64_be(2),
-                buy_token: H160::from_low_u64_be(3),
+                sell_token: H160::from_low_u64_be(1),
+                buy_token: H160::from_low_u64_be(2),
                 sell_amount: to_wei(100),
                 buy_amount: to_wei(90),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
             LimitOrder {
-                id: 4.into(),
-                sell_token: H160::from_low_u64_be(3),
-                buy_token: H160::from_low_u64_be(2),
+                id: 3.into(),
+                sell_token: H160::from_low_u64_be(2),
+                buy_token: H160::from_low_u64_be(1),
                 sell_amount: to_wei(90),
                 buy_amount: to_wei(100),
                 kind: OrderKind::Sell,
                 ..Default::default()
             },
-            /*
+            LimitOrder {
+                id: 4.into(),
+                sell_token: H160::from_low_u64_be(2),
+                buy_token: H160::from_low_u64_be(1),
+                sell_amount: to_wei(90),
+                buy_amount: to_wei(100),
+                kind: OrderKind::Sell,
+                ..Default::default()
+            },
             LimitOrder {
                 id: 5.into(),
-                sell_token: H160::from_low_u64_be(3),
+                sell_token: H160::from_low_u64_be(2),
                 buy_token: H160::from_low_u64_be(1),
-                sell_amount: to_wei(100),
+                sell_amount: to_wei(90),
                 buy_amount: to_wei(100),
                 kind: OrderKind::Sell,
                 ..Default::default()
-            },
-            LimitOrder {
-                id: 6.into(),
-                sell_token: H160::from_low_u64_be(3),
-                buy_token: H160::from_low_u64_be(1),
-                sell_amount: to_wei(100),
-                buy_amount: to_wei(100),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },
-            LimitOrder {
-                id: 7.into(),
-                sell_token: H160::from_low_u64_be(5),
-                buy_token: H160::from_low_u64_be(2),
-                sell_amount: to_wei(100),
-                buy_amount: to_wei(100),
-                kind: OrderKind::Sell,
-                ..Default::default()
-            },*/
-        ];
-        let contexts = vec![
-            TokenContext {
-                address: H160::from_low_u64_be(1),
-                reserve: to_wei(1000),
-                buy_volume: to_wei(200),
-                sell_volume: to_wei(180),
-            },
-            TokenContext {
-                address: H160::from_low_u64_be(2),
-                reserve: to_wei(1000),
-                buy_volume: to_wei(180),
-                sell_volume: to_wei(200),
-            },
-            TokenContext {
-                address: H160::from_low_u64_be(3),
-                reserve: to_wei(1000),
-                buy_volume: to_wei(200),
-                sell_volume: to_wei(180),
-            },
-            TokenContext {
-                address: H160::from_low_u64_be(1),
-                reserve: to_wei(1000),
-                buy_volume: to_wei(200),
-                sell_volume: to_wei(180),
             },
         ];
-
         let solution = optimize_orders(&all_orders);
         assert!(solution.is_some(), "solution found")
     }

@@ -12,6 +12,7 @@ use {
 
 mod baseline;
 mod naive;
+mod milp;
 
 /// A solver engine handle for E2E testing.
 pub struct SolverEngine {
